@@ -1,0 +1,14 @@
+Paper.js 0.12.18 (MIT)
+Repository: https://github.com/paperjs/paper.js
+Website: https://paperjs.org/
+Documentation: https://paperjs.org/reference/
+Vendored JavaScript: https://unpkg.com/paper@0.12.18/dist/paper-full.min.js
+Vendored license: https://unpkg.com/paper@0.12.18/LICENSE.txt
+Library changes: none. Original copyright and MIT license are preserved in vendor/.
+
+Examples to run and study (not copied as project code):
+https://paperjs.org/examples/hit-testing/
+https://paperjs.org/examples/path-intersections/
+https://paperjs.org/examples/boolean-operations/
+
+Project-specific HTML/CSS/JavaScript: generated with ChatGPT from the user's requirements.

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>작은 목공 작업실</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="vendor/paper-full.min.js"></script>
+  <script defer src="stages.js"></script>
+  <script defer src="wood.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <header>
+    <div><small>COMPUTER GRAPHICS · PROJECT 2</small><h1>작은 목공 작업실</h1></div>
+    <nav aria-label="스테이지">
+      <button id="prev" aria-label="이전 스테이지">←</button>
+      <select id="stage" aria-label="스테이지 선택"></select>
+      <button id="next" aria-label="다음 스테이지">→</button>
+      <button id="reset">Reset</button>
+    </nav>
+  </header>
+  <main>
+    <aside aria-label="도구">
+      <button data-tool="move" aria-pressed="true">✋ 이동</button>
+      <button data-tool="pencil" aria-pressed="false">✏️ 연필</button>
+      <button data-tool="saw" aria-pressed="false">🪚 톱</button>
+      <p>1. 판자 맞추기<br>2. 연필로 표시<br>3. 톱으로 자르기</p>
+    </aside>
+    <section>
+      <div id="workspace"><canvas id="canvas" aria-label="목공 작업대"></canvas></div>
+      <p id="status" role="status" aria-live="polite">작업대를 준비하고 있습니다.</p>
+    </section>
+  </main>
+  <footer>기준 판자는 고정되어 있습니다. 작업 판자를 옆에 대어 길이를 옮겨보세요.</footer>
+</body>
+</html>
