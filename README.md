@@ -1,4 +1,4 @@
-# 작은 목공 작업실 — Matter.js 충돌 연필
+# 작은 목공 작업실 — Matter.js 자 안내 연필
 
 수업 오픈소스 목록에 있는 Paper.js 0.12.18과 Matter.js 0.20.0을 사용합니다.
 설치·빌드·인터넷 연결 없이 index.html을 Chrome 또는 Edge로 열어 실행합니다.
@@ -12,9 +12,22 @@
 4. index.html을 브라우저로 엽니다. 이전 화면이 보이면 Ctrl+F5로 새로고침합니다.
 5. VS Code의 변경 목록을 확인하고 직접 커밋·푸시합니다.
 
-변경: index.html, style.css, stages.js, wood.js, app.js 및 설명 문서.
-추가: collision.js, vendor/matter.min.js, vendor/MATTER-LICENSE.txt, tests/verify.cjs.
-Paper.js 배포본은 그대로 사용합니다. SAT.js는 사용하지 않습니다.
+이번 오류 수정의 핵심 파일: app.js, collision.js.
+안내 문구(index.html), 회귀 검사(tests/verify.cjs) 및 설명 문서도 갱신했습니다.
+Paper.js·Matter.js 배포본과 라이선스는 그대로 사용합니다.
+
+## 이번에 수정한 오류
+
+- 겹친 모서리에서 위의 작은 판자가 그리기 대상으로 선택되어, 작은 판자 위에 선이 생기던 문제를 수정했습니다.
+- 넓은 판자와 그 조각은 작업 대상(stock), 원래 작은 판자는 자(guide)로 구분합니다.
+  두 판자는 계속 움직일 수 있고, 작은 자에는 선을 기록하지 않습니다.
+- 자의 변 근처 10화면 픽셀 안에서는 바깥쪽 평행선에 붙여 안내합니다.
+  마우스가 조금 안쪽으로 들어가거나 바깥쪽에서 흔들려도 선은 곧게 유지됩니다.
+  바깥쪽으로 20화면 픽셀 이상 떼면 자유 이동으로 돌아갑니다.
+- 자 위에 실제로 선을 그리지 않도록 연필 중심을 변 바깥쪽 2논리 단위에 둡니다.
+- 자를 따라 되짚은 구간도 현재 끝점까지의 한 선으로 정리합니다.
+- 끝 변 클릭은 실제 연필 끝이 닿은 작업 판자 경계에서 확정합니다.
+  자 안쪽으로 조금 넘어간 마우스 위치를 선의 끝점으로 저장하지 않습니다.
 CODE.md에 직접 작성하거나 수정한 코드 전문을 파일별로 수록했습니다.
 
 ## 조작
@@ -23,11 +36,14 @@ CODE.md에 직접 작성하거나 수정한 코드 전문을 파일별로 수록
    화면 밖으로 나가지 않도록 작업대 경계만 제한합니다.
    면적이 큰 판자를 먼저 그리고 작은 판자를 나중에 그리므로, 작은 판자가 위에 놓입니다.
    겹친 부분에서는 위 판자가 선택됩니다. 아래 판자는 노출된 부분을 잡습니다.
-2. 연필: 선을 그릴 판자의 **보이는 변**을 클릭합니다. 내부 클릭으로는 시작하지 않습니다.
+2. 연필: 큰 **작업 판자의 변**을 클릭합니다. 작은 판자는 자 역할입니다.
+   두 판자의 변이 만나는 지점을 클릭해도 작업 판자를 선택합니다.
+   자에 가려진 작업 판자 내부나 작은 판자에만 해당하는 변에서는 시작하지 않습니다.
 3. 버튼을 누르고 있지 않아도 마우스를 따라 연한 자취가 쌓입니다.
-   위쪽 판자에 닿으면 실제 연필 끝이 멈추고, 조금 넘어간 마우스와 연필 끝이 분리됩니다.
-   옆으로 움직이면 그 변을 따라 이동합니다. 왼쪽·오른쪽·윗변·밑변 모두 동일합니다.
-4. 같은 판자의 다른 보이는 변에 도착해 클릭하면 자취가 진한 선으로 확정됩니다.
+   작은 판자의 변에 가까워지면 연필이 그 변을 따라 곧게 이동합니다.
+   마우스가 조금 넘어가도 실제 연필 끝은 변 바깥쪽에 붙어 있습니다.
+   바깥으로 충분히 떼면 자유 이동합니다. 왼쪽·오른쪽·윗변·밑변 모두 동일합니다.
+4. 같은 작업 판자의 다른 변에 도착해 클릭하면 자취가 진한 선으로 확정됩니다.
    막힌 판자 너머의 끝점을 클릭해도 연필이 그곳까지 순간 이동하지 않습니다.
 5. 톱: 확정한 선의 보이는 부분을 클릭하면 경로를 따라 두 조각으로 분리됩니다.
    이동 도구로 조각을 끌어 분리를 확인합니다. 가려진 선은 위 판자를 옮긴 뒤 클릭합니다.
@@ -49,7 +65,7 @@ CODE.md에 직접 작성하거나 수정한 코드 전문을 파일별로 수록
 | 구성 | 사용한 기능 | 직접 작성한 동작 |
 |---|---|---|
 | Paper.js | Path, Group/clipMask, contains, getNearestLocation, getIntersections, area, Tool, View | 판자 표시·선 저장·경계 시작/종료·두 조각 생성 |
-| Matter.js | Bodies.circle, Bodies.rectangle, Body.setPosition, Query.collides | 연필 충돌체·변별 충돌체 구성·작은 이동 단위 검사·접촉 직전 이분 탐색·접선 이동 |
+| Matter.js | Bodies.circle, Bodies.rectangle, Body.setPosition, Query.collides | 연필 충돌체·변별 충돌체 구성·작은 이동 단위 검사·접촉 직전 이분 탐색·변 부착/해제·접선 투영 |
 | 일반 JavaScript | 배열·Map·이벤트 | 면적순 쌓기·상태 관리·Reset·도구 전환 |
 
 Matter.Engine/Runner로 중력이나 반발을 시뮬레이션하지 않습니다.
@@ -81,7 +97,9 @@ node tests/verify.cjs
 ```
 
 추가 패키지는 필요하지 않습니다. 포함된 실제 Paper.js·Matter.js를 불러와
-네 방향 충돌·빠른 이동·접선 이동·꺾인 경로 절단·면적 보존과
+사진의 겹친 모서리 상황·그리기 대상 선택·자 위 그리기 방지·
+네 변에서 마우스 흔들림에 대한 직선 유지·되짚기 정리·부착/해제·
+실제 연필 끝에서의 확정·빠른 이동·꺾인 경로 절단·면적 보존과
 입력 이벤트를 통한 드래그/확정/절단·스테이지 보존·Reset·취소·로컬 좌표를 확인합니다.
 DOM은 테스트용 대역을 사용하므로 이 검사는 브라우저 렌더링 검사를 대신하지 않습니다.
 이번 제공본은 실행 환경 제한으로 실제 브라우저 화면 검증을 마치지 못했습니다.
@@ -92,6 +110,6 @@ DOM은 테스트용 대역을 사용하므로 이 검사는 브라우저 렌더�
 git status
 git add index.html style.css stages.js wood.js app.js collision.js vendor/matter.min.js vendor/MATTER-LICENSE.txt README.md CODE.md SOURCES.txt AI_USAGE.md tests/verify.cjs
 git diff --cached --stat
-git commit -m "Add Matter.js constrained pencil tracing and free board movement"
+git commit -m "Fix ruler board selection and straight pencil guidance"
 git push
 ```

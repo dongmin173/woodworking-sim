@@ -22,3 +22,7 @@ Library changes: none. Original copyright and MIT license are preserved in vendo
 Used APIs: Bodies.circle, Bodies.rectangle, Body.setPosition, Query.collides.
 Custom logic: substeps, collision contact search, tangential sliding, board stacking,
 tracing state and boundary-to-boundary polygon splitting. No SAT.js dependency.
+
+Ruler fix: stock/guide role selection, magnetic face attachment and hysteresis,
+parallel line projection, retrace cleanup and constrained endpoint confirmation
+are custom project logic. Matter.js Query.collides remains the collision check.

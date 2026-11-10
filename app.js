@@ -18,8 +18,11 @@
   });
   function initial() {
     const s = STAGES[stageIndex];
-    return { boards: [Wood.create(140, 320, ...s.wide, "넓은 판자"),
-      Wood.create(450, 130, ...s.narrow, "좁은 판자")] };
+    const stock = Wood.create(140, 320, ...s.wide, "작업 판자");
+    const guide = Wood.create(450, 130, ...s.narrow, "자 판자");
+    stock.role = "stock";
+    guide.role = "guide";
+    return { boards: [stock, guide] };
   }
   function cancel() {
     draft = null;
@@ -37,8 +40,14 @@
   }
   function findEdge(p) {
     for (const board of Wood.sorted(state().boards).reverse()) {
+      // 위쪽 판자는 자입니다. 겹친 모서리에서도 그리기 대상으로 선택하지 않습니다.
+      if (board.role === "guide") continue;
       const edge = Wood.edge(board, p);
-      if (edge.distance <= edgeTolerance() && !covered(board, edge.point)) return { board, ...edge };
+      if (edge.distance > edgeTolerance()) continue;
+      const collision = makeCollision(board);
+      const point = collision.startAt(edge.point, q =>
+        Wood.edge(board, q).distance < 0.02 && !covered(board, q));
+      if (point) return { board, ...edge, point, collision };
     }
     return null;
   }
@@ -66,16 +75,15 @@
     });
     if (draft) {
       const tip = world(draft.board, draft.points[draft.points.length - 1]);
-      if (rawMouse && tip.getDistance(rawMouse) > 5) new paper.Path.Line({
-        from: tip, to: rawMouse, strokeColor: "#7e7770", dashArray: [3, 5], opacity: 0.4
-      });
       new paper.Path.Circle({ center: tip, radius: 4, fillColor: draft.touched ? "#ce693c" : "#344b55" });
       new paper.Path.Circle({ center: world(draft.board, draft.points[0]), radius: 4,
         strokeColor: "#344b55", strokeWidth: 2 });
     } else if (mode === "pencil" && hover) {
       new paper.Path.Circle({ center: hover.point, radius: 5, fillColor: "#486749" });
     }
-    if (draft) label([30, H - 20], "다른 변 클릭: 선 확정 · Esc: 자취 취소");
+    if (draft) label([30, H - 20], draft.collision.lock
+      ? "자에 붙어 직선 그리기 · 바깥으로 떼면 자유 이동 · 다른 변 클릭: 확정"
+      : "작업 판자에 그리는 중 · 다른 변 클릭: 선 확정 · Esc: 취소");
     paper.view.update();
   }
   function choose(index) {
@@ -91,12 +99,20 @@
     const points = draft.points, q = local(draft.board, p);
     const last = points[points.length - 1];
     if (Math.hypot(q[0] - last[0], q[1] - last[1]) < 0.03) return;
-    // 같은 방향의 일직선 중간점만 제거하고 모서리와 접촉 경로는 유지합니다.
-    if (points.length > 1) {
+    // 자를 따라 되짚은 구간도 겹쳐 쌓지 않고 현재 끝점까지의 한 선으로 유지합니다.
+    while (points.length > 1) {
+      const last = points[points.length - 1];
       const a = points[points.length - 2];
       const ab = new paper.Point(last[0] - a[0], last[1] - a[1]);
-      const bc = new paper.Point(q[0] - last[0], q[1] - last[1]);
-      if (Math.abs(ab.cross(bc)) < 0.00001 && ab.dot(bc) > 0) points.pop();
+      const aq = new paper.Point(q[0] - a[0], q[1] - a[1]);
+      if (Math.abs(ab.cross(aq)) >= 0.00001) break;
+      const distance = aq.dot(ab);
+      if (distance >= 0 && distance <= ab.dot(ab)) {
+        if (aq.length < 0.03) points.pop();
+        else points[points.length - 1] = q;
+        return;
+      }
+      points.pop();
     }
     points.push(q);
   }
@@ -112,23 +128,31 @@
     rawMouse = p.clone();
     path.remove();
   }
+  function makeCollision(board) {
+    return new PencilCollision(topBoards(board), {
+      snap: 10 / paper.view.zoom, release: 20 / paper.view.zoom
+    });
+  }
   function start(edge) {
-    const collision = new PencilCollision(topBoards(edge.board));
-    if (collision.hits(edge.point).length) return say("위쪽 판자에 가려지지 않은 변에서 시작하세요.");
+    const collision = edge.collision;
     draft = { board: edge.board, points: [local(edge.board, edge.point)], collision, touched: false };
     $("cancel").disabled = false;
-    say("마우스를 움직여 자취를 그리세요. 다른 변을 클릭하면 확정합니다. Esc로 취소합니다.");
+    say("작업 판자에 그립니다. 작은 판자의 변에 연필을 대면 직선으로 안내합니다. 다른 변을 클릭해 확정하세요.");
   }
   function finish(p) {
     const board = draft.board, edge = Wood.edge(board, p);
-    if (edge.distance > edgeTolerance() || covered(board, edge.point)) {
-      return say("현재 그리는 판자의 보이는 변을 클릭해서 확정하세요.");
+    if (edge.distance > edgeTolerance()) {
+      return say("작업 판자의 다른 변을 클릭해서 확정하세요.");
     }
     follow(edge.point);
     const last = world(board, draft.points[draft.points.length - 1]);
-    if (last.getDistance(edge.point) > 1.1) return say("연필이 판자에 막혀 있습니다. 변을 따라 끝점까지 이동하세요.");
+    const end = Wood.edge(board, last);
+    // 마우스가 자 안쪽에 있어도 실제 연필 끝이 도착한 작업 판자 경계에서 끝냅니다.
+    if (end.distance > 1.1 || last.getDistance(edge.point) > 30 / paper.view.zoom) {
+      return say("실제 연필 끝을 작업 판자의 다른 변까지 이동한 뒤 클릭하세요.");
+    }
     const points = draft.points.map(p => [...p]);
-    points[points.length - 1] = local(board, edge.point);
+    points[points.length - 1] = local(board, end.point);
     if (!Wood.validMark(board, points)) return say("경로가 교차하거나 경계에 다시 닿았습니다. 취소 후 판자 내부를 지나 다른 변까지 그려주세요.");
     board.marks.push(points);
     cancel();
@@ -146,6 +170,7 @@
       if (index < 0) continue;
       const pieces = Wood.cut(board, board.marks[index]);
       if (!pieces) return say("이 경로로는 두 조각을 만들 수 없습니다. 경계와 선을 확인하세요.");
+      pieces.forEach(piece => { piece.role = "stock"; });
       // 나머지 확정선은 절단 때 지웁니다. 새 조각에서 다시 그릴 수 있습니다.
       state().boards.splice(state().boards.indexOf(board), 1, ...pieces);
       say("선을 따라 두 조각으로 잘랐습니다. 이동 도구로 조각을 드래그해 확인하세요.");
@@ -164,7 +189,7 @@
       else {
         const edge = findEdge(p);
         if (edge) start(edge);
-        else say("선을 시작할 판자의 보이는 변을 클릭하세요.");
+        else say("큰 작업 판자의 변을 클릭하세요. 작은 판자는 선을 곧게 안내하는 자입니다.");
       }
     } else saw(p);
     draw();
@@ -192,7 +217,7 @@
       document.querySelectorAll("[data-tool]").forEach(b => b.setAttribute("aria-pressed", String(b === button)));
       canvas.style.cursor = mode === "move" ? "grab" : "crosshair";
       say({ move: "판자와 조각을 자유롭게 드래그하세요.",
-        pencil: "판자의 보이는 변을 클릭해 자취를 시작하세요.",
+        pencil: "큰 작업 판자의 변을 클릭하세요. 작은 판자는 자로 사용합니다.",
         saw: "확정한 연필선을 클릭하세요. 가려진 선은 위 판자를 옮긴 뒤 자르세요." }[mode]);
       draw();
     };
