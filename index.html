@@ -6,8 +6,10 @@
   <title>작은 목공 작업실</title>
   <link rel="stylesheet" href="style.css">
   <script defer src="vendor/paper-full.min.js"></script>
+  <script defer src="vendor/matter.min.js"></script>
   <script defer src="stages.js"></script>
   <script defer src="wood.js"></script>
+  <script defer src="collision.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -25,13 +27,14 @@
       <button data-tool="move" aria-pressed="true">✋ 이동</button>
       <button data-tool="pencil" aria-pressed="false">✏️ 연필</button>
       <button data-tool="saw" aria-pressed="false">🪚 톱</button>
-      <p>1. 판자 맞추기<br>2. 연필로 표시<br>3. 톱으로 자르기</p>
+      <button id="cancel" disabled>자취 취소</button>
+      <p>1. 두 판자 겹치기<br>2. 큰 판자의 변 클릭<br>3. 작은 판자 따라 그리기<br>4. 다른 변 클릭으로 확정<br>5. 톱으로 선 클릭</p>
     </aside>
     <section>
       <div id="workspace"><canvas id="canvas" aria-label="목공 작업대"></canvas></div>
       <p id="status" role="status" aria-live="polite">작업대를 준비하고 있습니다.</p>
     </section>
   </main>
-  <footer>기준 판자는 고정되어 있습니다. 작업 판자를 옆에 대어 길이를 옮겨보세요.</footer>
+  <footer>두 판자를 모두 움직일 수 있습니다. 면적이 작은 판자가 위에 놓입니다. 연필은 위쪽 판자의 모든 변에 막히며, 변을 따라 이동합니다. Esc: 자취 취소</footer>
 </body>
 </html>

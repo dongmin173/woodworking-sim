@@ -12,3 +12,13 @@ https://paperjs.org/examples/path-intersections/
 https://paperjs.org/examples/boolean-operations/
 
 Project-specific HTML/CSS/JavaScript: generated with ChatGPT from the user's requirements.
+
+Matter.js 0.20.0 (MIT) — also listed in the course's 2D OSS list
+Repository: https://github.com/liabru/matter-js
+Documentation: https://brm.io/matter-js/docs/
+Vendored JavaScript: https://cdn.jsdelivr.net/npm/matter-js@0.20.0/build/matter.min.js
+Vendored license: https://cdn.jsdelivr.net/npm/matter-js@0.20.0/LICENSE
+Library changes: none. Original copyright and MIT license are preserved in vendor/.
+Used APIs: Bodies.circle, Bodies.rectangle, Body.setPosition, Query.collides.
+Custom logic: substeps, collision contact search, tangential sliding, board stacking,
+tracing state and boundary-to-boundary polygon splitting. No SAT.js dependency.

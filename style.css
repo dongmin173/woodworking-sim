@@ -7,6 +7,7 @@ h1 { margin: 2px 0; font-size: 28px; }
 nav { align-items: center; flex-wrap: wrap; }
 button, select { padding: 11px 15px; border: 1px solid #c7bba7; border-radius: 8px; background: #fffdf8; color: inherit; font: inherit; cursor: pointer; }
 button:hover { background: #e9e1d1; }
+button:disabled { opacity: .45; cursor: default; }
 button:focus-visible, select:focus-visible { outline: 3px solid #bc7a36; outline-offset: 2px; }
 button[aria-pressed="true"] { background: #435f48; color: white; border-color: #435f48; }
 main { max-width: 1240px; margin: auto; align-items: stretch; }
