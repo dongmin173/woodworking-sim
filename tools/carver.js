@@ -1,35 +1,25 @@
+/* 클릭 위치 중심의 픽셀 브러시. 절삭은 항상 직전 도형에서 차감합니다. */
 window.WorkshopTools = window.WorkshopTools || {};
 
 WorkshopTools.Carver = class {
   constructor(ctx, { name, size, dragOnly }) {
-    this.ctx = ctx;
-    this.name = name;
-    this.size = size;
-    this.dragOnly = dragOnly;
-    this.stroke = null;
-    this.tip = null;
-    this.hoverBoard = null;
+    Object.assign(this, { ctx, name, size, dragOnly });
+    this.stroke = this.tip = this.hoverBoard = null;
   }
 
   activate() {
     this.ctx.say(
-      this.dragOnly
-        ? `톱 끝을 누른 채 드래그하세요. 끝부분 주변 ${this.size}×${this.size}px를 깎습니다. 클릭만 하면 깎이지 않습니다.`
-        : `구두칼: 클릭 위치 중심 ${this.size}×${this.size}px를 깎습니다. 빈 곳에서 드래그를 시작해도 됩니다.`
+      `${this.name}: 클릭 위치 중심 ${this.size}×${this.size}px를 깎습니다.`
     );
   }
 
-  // 클릭 위치를 중심으로 브러시 사각형을 계산합니다.
   brush(board, point) {
-    const x =
+    return [
       Math.round(point.x - board.x - (board.gridX || 0))
-      - this.size / 2;
-
-    const y =
+        - this.size / 2,
       Math.round(point.y - board.y - (board.gridY || 0))
-      - this.size / 2;
-
-    return [x, y];
+        - this.size / 2
+    ];
   }
 
   move(point) {
@@ -42,7 +32,6 @@ WorkshopTools.Carver = class {
 
     this.move(point);
 
-    // 판자 밖을 클릭해도 드래그 작업을 시작합니다.
     const snapshot = [...this.ctx.scene.boards];
     const order = Wood.sorted(snapshot).reverse();
 
@@ -52,21 +41,23 @@ WorkshopTools.Carver = class {
       start: point.clone(),
       last: point.clone(),
       started: false,
-      records: new Map(),
-      shapes: new Map(
-        order.map(board => [board, Wood.shape(board)])
-      ),
-      bounds: new Map(
-        order.map(board => [board, Wood.bounds(board)])
-      )
+
+      records: new Map(order.map(source => [
+        source, {
+          source,
+          shown: [source],
+          remaining: Wood.shape(source),
+          removedArea: 0
+        }
+      ])),
+
+      shapes: new Map(order.map(b => [b, Wood.shape(b)])),
+      bounds: new Map(order.map(b => [b, Wood.bounds(b)]))
     };
 
     this.ctx.setCancel(true);
 
-    // 구두칼은 클릭 즉시, 톱은 드래그가 시작된 뒤 깎습니다.
-    if (!this.dragOnly) {
-      this.stamp(point);
-    }
+    if (!this.dragOnly) this.stamp(point);
   }
 
   drag(point) {
@@ -74,12 +65,8 @@ WorkshopTools.Carver = class {
 
     this.move(point);
 
-    if (
-      this.dragOnly &&
-      !this.stroke.started &&
-      this.stroke.start.getDistance(point)
-        * paper.view.zoom < 1
-    ) {
+    if (this.dragOnly && !this.stroke.started
+      && this.stroke.start.getDistance(point) * paper.view.zoom < 1) {
       return;
     }
 
@@ -87,16 +74,28 @@ WorkshopTools.Carver = class {
     this.stamp(point);
   }
 
-  stamp(point) {
-    const s = this.stroke;
-    const delta = point.subtract(s.last);
+  footprint(record, point) {
+    const cell = this.brush(record.source, point);
+    const key = cell.join(",");
 
-    // 빠른 드래그에서도 중간 픽셀이 빠지지 않도록 나눠 검사합니다.
+    if (record.brushKey === key) return null;
+    record.brushKey = key;
+
+    return new paper.Path.Rectangle({
+      insert: false,
+      rectangle: new paper.Rectangle(
+        Wood.cellOrigin(record.source, cell),
+        new paper.Size(this.size, this.size)
+      )
+    });
+  }
+
+  stamp(point) {
+    const s = this.stroke, delta = point.subtract(s.last);
+
     const steps = Math.max(
       1,
-      Math.ceil(
-        Math.max(Math.abs(delta.x), Math.abs(delta.y)) * 2
-      )
+      Math.ceil(Math.max(Math.abs(delta.x), Math.abs(delta.y)) * 2)
     );
 
     const pending = new Map();
@@ -104,119 +103,85 @@ WorkshopTools.Carver = class {
     for (let i = 0; i <= steps; i++) {
       const p = s.last.add(delta.multiply(i / steps));
 
-      for (let layer = 0; layer < s.order.length; layer++) {
-        const source = s.order[layer];
-        const cell = this.brush(source, p);
-        const origin = Wood.cellOrigin(source, cell);
+      for (const record of s.records.values()) {
+        // 빈 테이블에서도 상태를 갱신해야 선 끝을 돌아갈 수 있습니다.
+        const footprint = this.footprint(record, p);
+        if (!footprint) continue;
 
-        const brushRect = new paper.Rectangle(
-          origin,
-          new paper.Size(this.size, this.size)
-        );
-
-        if (!brushRect.intersects(s.bounds.get(source))) {
+        if (!footprint.bounds.intersects(
+          s.bounds.get(record.source)
+        )) {
+          footprint.remove();
           continue;
         }
 
-        let record = s.records.get(source);
-
-        if (!record) {
-          record = {
-            source,
-            shown: [source],
-            cells: new Set(),
-            stencil: null,
-            removedArea: 0
-          };
-
-          s.records.set(source, record);
-        }
-
-        for (let y = 0; y < this.size; y++) {
-          for (let x = 0; x < this.size; x++) {
-            const pixel = [
-              cell[0] + x,
-              cell[1] + y
-            ];
-
-            const key = pixel.join(",");
-            if (record.cells.has(key)) continue;
-
-            const corner = Wood.cellOrigin(source, pixel);
-
-            const pixelRect = new paper.Rectangle(
-              corner,
-              new paper.Size(1, 1)
-            );
-
-            if (
-              !pixelRect.intersects(s.bounds.get(source))
-            ) {
-              continue;
-            }
-
-            const center = corner.add([0.5, 0.5]);
-
-            // 한 번의 드래그 중에는 위 판자에 가려져 있던
-            // 아래 판자까지 연속으로 뚫지 않습니다.
-            const covered = s.order
-              .slice(0, layer)
-              .some(board =>
-                s.shapes.get(board).contains(center)
-              );
-
-            if (covered) continue;
-
-            record.cells.add(key);
-
-            if (!pending.has(record)) {
-              pending.set(record, []);
-            }
-
-            pending.get(record).push(pixel);
-          }
-        }
+        if (!pending.has(record)) pending.set(record, []);
+        pending.get(record).push(footprint);
       }
     }
 
     s.last = point.clone();
 
-    for (const [record, cells] of pending) {
-      const next = Wood.stencil(record.source, cells);
+    for (const [record, footprints] of pending) {
+      let cutter = Wood.union(footprints);
+      const layer = s.order.indexOf(record.source);
 
-      record.stencil = record.stencil
-        ? martinez.union(record.stencil, next)
-        : next;
+      // 시작할 때 위에 있던 재료는 아래 판자를 계속 가립니다.
+      for (const upper of s.order.slice(0, layer)) {
+        if (!cutter.bounds.intersects(s.bounds.get(upper))) {
+          continue;
+        }
+
+        const visible = cutter.subtract(
+          s.shapes.get(upper),
+          { insert: false }
+        );
+
+        cutter.remove();
+        cutter = visible;
+      }
 
       const result = Wood.carve(
         record.source,
-        record.stencil
+        cutter,
+        record.remaining
       );
 
+      cutter.remove();
       if (!result) continue;
 
-      this.ctx.replace(
-        record.shown,
-        result.pieces,
-        false
-      );
+      this.ctx.replace(record.shown, result.pieces, false);
 
+      record.remaining.remove();
+      record.remaining = result.remaining;
       record.shown = result.pieces;
-      record.removedArea = result.removedArea;
+      record.removedArea += result.removedArea;
+      record.cleaned ||= result.cleaned;
     }
 
-    const area = [...s.records.values()].reduce(
-      (sum, record) => sum + record.removedArea,
-      0
+    const records = [...s.records.values()];
+    const area = records.reduce(
+      (sum, r) => sum + r.removedArea, 0
     );
 
     this.ctx.say(
-      `${this.name}: ${area.toFixed(2)}px² 깎았습니다. Esc: 이번 드래그 취소`
+      `${this.name}: ${area.toFixed(2)}px² 깎았습니다.`
+      + `${records.some(r => r.cleaned)
+        ? " 잔여 윤곽을 정리했습니다." : ""}`
+      + " Esc: 이번 드래그 취소"
     );
   }
 
   releaseShapes() {
-    this.stroke?.shapes.forEach(shape => shape.remove());
+    if (!this.stroke) return;
+
+    this.stroke.shapes.forEach(shape => shape.remove());
+
+    this.stroke.records.forEach(record => {
+      record.remaining.remove();
+      record.lastFootprint?.remove();
+      record.barrier?.remove();
+    });
   }
 
   up() {
@@ -234,9 +199,7 @@ WorkshopTools.Carver = class {
 
   cancel() {
     if (this.stroke) {
-      this.ctx.scene.boards = [
-        ...this.stroke.snapshot
-      ];
+      this.ctx.scene.boards = [...this.stroke.snapshot];
 
       this.releaseShapes();
       this.stroke = null;
@@ -255,9 +218,8 @@ WorkshopTools.Carver = class {
 
   drawBoard(board) {
     const active = this.stroke
-      ? [...this.stroke.records.values()].some(record =>
-          record.shown.includes(board)
-        )
+      ? [...this.stroke.records.values()].some(r =>
+        r.shown.includes(board))
       : this.hoverBoard === board;
 
     if (active) Wood.grid(board);
@@ -267,10 +229,7 @@ WorkshopTools.Carver = class {
     if (!this.tip) return;
 
     const board = this.hoverBoard || {
-      x: 0,
-      y: 0,
-      gridX: 0,
-      gridY: 0
+      x: 0, y: 0, gridX: 0, gridY: 0
     };
 
     const origin = Wood.cellOrigin(
@@ -288,8 +247,6 @@ WorkshopTools.Carver = class {
       strokeWidth: 1 / paper.view.zoom
     });
 
-    this.ctx.hud(
-      `${this.name} · 끝부분 기준 ${this.size}×${this.size}px`
-    );
+    this.ctx.hud(`${this.name} · ${this.size}×${this.size}px`);
   }
 };
