@@ -1,133 +1,412 @@
-/* Matter.js 충돌 검사 + 변을 자처럼 사용하는 직선 안내.
-   자와 접촉한 동안에는 마우스를 변의 접선에 투영해 같은 직선을 유지합니다. */
-window.PencilCollision = class {
-  constructor(boards, { snap = 10, release = 20 } = {}) {
-    this.boards = boards;
-    this.snap = snap;
-    this.release = release;
-    this.clearance = 2;
+/* Matter.js로 움직이는 점을 검사합니다.
+   접촉한 면은 가로/세로 제한선이 됩니다. */
+window.EdgeSnap = class {
+  constructor() {
     this.lock = null;
-    this.probe = Matter.Bodies.circle(0, 0, 1.5, { isSensor: true });
-    this.edges = boards.flatMap(board => {
-      const points = board.points;
-      const area2 = points.reduce((sum, [x, y], i) => {
-        const next = points[(i + 1) % points.length];
-        return sum + x * next[1] - next[0] * y;
-      }, 0);
-      return points.map(([x, y], i) => {
-        const next = points[(i + 1) % points.length];
-        const a = new paper.Point(board.x + x, board.y + y);
-        const b = new paper.Point(board.x + next[0], board.y + next[1]);
-        const delta = b.subtract(a), length = delta.length, tangent = delta.divide(length);
-        const normal = new paper.Point(tangent.y, -tangent.x).multiply(area2 >= 0 ? 1 : -1);
-        const body = Matter.Bodies.rectangle((a.x + b.x) / 2, (a.y + b.y) / 2,
-          length, 0.2, { isStatic: true, angle: Math.atan2(delta.y, delta.x) });
-        body.plugin = { a, b, length, tangent, normal, board };
-        return body;
-      });
-    });
+    this.hoverMotion = null;
+    this.edges = [];
+    this.shapes = new Map();
+    this.probe = null;
+    this.radius = 0;
+    this.snapPixels = 10;
+    this.releasePixels = 26;
   }
-  hits(point) {
-    Matter.Body.setPosition(this.probe, { x: point.x, y: point.y });
-    return Matter.Query.collides(this.probe, this.edges);
+
+  clear() {
+    this.lock = null;
+    this.hoverMotion = null;
   }
-  safe(point, allowed) {
-    return allowed(point) && !this.hits(point).length
-      && !this.boards.some(board => Wood.contains(board, point));
+
+  rebuild(boards) {
+    this.clear();
+
+    this.shapes.forEach(shape => shape.remove());
+    this.shapes = new Map(
+      boards.map(board => [board.id, Wood.shape(board)])
+    );
+
+    this.edges = Wood.sorted(boards).reverse().flatMap(board =>
+      board.contours.flatMap((points, contour) =>
+        points.map(([x, y], index) => {
+          const next = points[(index + 1) % points.length];
+
+          const a = new paper.Point(
+            board.x + x,
+            board.y + y
+          );
+
+          const b = new paper.Point(
+            board.x + next[0],
+            board.y + next[1]
+          );
+
+          const delta = b.subtract(a);
+          if (delta.length < 0.000001) return null;
+
+          const body = Matter.Bodies.rectangle(
+            (a.x + b.x) / 2,
+            (a.y + b.y) / 2,
+            delta.length,
+            0.2,
+            {
+              isStatic: true,
+              angle: Math.atan2(delta.y, delta.x)
+            }
+          );
+
+          body.plugin.edge = {
+            board,
+            contour,
+            index,
+            a,
+            b
+          };
+
+          return body;
+        }).filter(Boolean)
+      )
+    );
   }
-  // 자 바깥쪽의 일정한 거리에 있는 평행선 위로 투영합니다.
-  projected(edge, point) {
-    const e = edge.plugin, along = point.subtract(e.a).dot(e.tangent);
-    return { along, point: e.a.add(e.tangent.multiply(Math.max(0, Math.min(e.length, along))))
-      .add(e.normal.multiply(this.clearance)) };
+
+  nearest(edge, point) {
+    const delta = edge.b.subtract(edge.a);
+
+    const t = Math.max(0, Math.min(
+      1,
+      point.subtract(edge.a).dot(delta) / delta.dot(delta)
+    ));
+
+    return edge.a.add(delta.multiply(t));
   }
-  nearby(point, allowed) {
+
+  motion(board, point, contacts = []) {
+    return {
+      board,
+      point: point.clone(),
+      contacts: [...contacts]
+    };
+  }
+
+  // 点の移動区間で、最初に横切る材料境界を求めます。
+  crossing(owner, a, b) {
+    const direction = b.subtract(a);
+    if (direction.length < 0.000001) return null;
+
+    const bodies = this.edges.filter(
+      body => body.plugin.edge.board !== owner
+    );
+
+    const candidates = new Set(
+      Matter.Query.ray(bodies, a, b, 0.001).map(hit => hit.body)
+    );
+
     let best = null;
-    for (const edge of this.edges) {
-      const projection = this.projected(edge, point), e = edge.plugin;
-      if (projection.along < -0.001 || projection.along > e.length + 0.001) continue;
-      const distance = projection.point.getDistance(point);
-      if (distance <= this.snap && (!best || distance < best.distance)
-        && this.safe(projection.point, allowed)) best = { edge, point: projection.point, distance };
+
+    for (const body of bodies) {
+      if (!candidates.has(body)) continue;
+
+      const edge = body.plugin.edge;
+      const side = edge.b.subtract(edge.a);
+      const denominator = direction.cross(side);
+
+      if (Math.abs(denominator) < 0.0000001) continue;
+
+      const delta = edge.a.subtract(a);
+      const t = delta.cross(side) / denominator;
+      const u = delta.cross(direction) / denominator;
+
+      if (
+        t < -0.000001 ||
+        t > 1.000001 ||
+        u < -0.000001 ||
+        u > 1.000001
+      ) {
+        continue;
+      }
+
+      const shape = this.shapes.get(edge.board.id);
+      const dt = Math.min(
+        0.001,
+        0.02 / direction.length
+      );
+
+      const inside = p =>
+        shape.contains(p) &&
+        shape.getNearestPoint(p).getDistance(p) > 0.000001;
+
+      const before = inside(
+        a.add(direction.multiply(t - dt))
+      );
+
+      const after = inside(
+        a.add(direction.multiply(t + dt))
+      );
+
+      // 모서리를 스치는 이동과 바깥쪽으로 떨어지는 이동은 허용합니다.
+      if (
+        before === after ||
+        (t <= 0.000001 && !after)
+      ) {
+        continue;
+      }
+
+      if (!best || t < best.t) {
+        best = {
+          edge,
+          t: Math.max(0, t),
+          point: a.add(
+            direction.multiply(Math.max(0, Math.min(1, t)))
+          )
+        };
+      }
     }
+
     return best;
   }
-  startAt(point, allowed) {
-    const contact = this.nearby(point, allowed);
-    if (contact) {
-      this.lock = contact.edge;
-      return contact.point;
+
+  contact(hit, from, target) {
+    const tangent = hit.edge.b
+      .subtract(hit.edge.a)
+      .normalize();
+
+    let normal = new paper.Point(
+      -tangent.y,
+      tangent.x
+    );
+
+    const sample = hit.t > 0.000001
+      ? from
+      : from.subtract(
+          target.subtract(from).normalize(0.01)
+        );
+
+    if (sample.subtract(hit.edge.a).dot(normal) < 0) {
+      normal = normal.negate();
     }
-    return this.safe(point, allowed) ? point.clone() : null;
+
+    return {
+      edge: hit.edge,
+      normal
+    };
   }
-  advance(from, target, allowed) {
-    if (this.lock) return this.guided(from, target, allowed);
-    return this.free(from, target, allowed);
-  }
-  guided(from, target, allowed) {
-    const edge = this.lock, e = edge.plugin;
-    const distanceOut = target.subtract(e.a).dot(e.normal);
-    if (distanceOut > this.clearance + this.release) {
-      this.lock = null;
-      return this.free(from, target, allowed, false);
-    }
-    const projection = this.projected(edge, target);
-    const result = this.free(from, projection.point, allowed, false);
-    result.touched = true;
-    // 자 끝을 지나면 모서리를 돌아가거나 자유롭게 움직일 수 있습니다.
-    if ((projection.along < 0 || projection.along > e.length)
-      && result.point.getDistance(projection.point) < 0.01) {
-      this.lock = null;
-      const rest = this.free(result.point, target, allowed);
-      return { point: rest.point, trail: [...result.trail, ...rest.trail], touched: rest.touched };
-    }
-    return result;
-  }
-  free(from, target, allowed, capture = true) {
-    let current = from.clone(), touched = false;
-    const trail = [], delta = target.subtract(from);
-    const steps = Math.max(1, Math.ceil(delta.length)), step = delta.divide(steps);
-    for (let i = 0; i < steps; i++) {
-      const next = current.add(step);
-      if (!allowed(next)) break;
-      const contact = capture ? this.nearby(next, allowed) : null;
-      if (contact && this.safe(current, allowed)) {
-        // 접촉선까지도 이동 구간 전체를 검사하므로 다른 판자를 가로질러 붙지 않습니다.
-        const approach = this.free(current, contact.point, allowed, false);
-        if (approach.point.getDistance(contact.point) < 0.01) {
-          trail.push(...approach.trail);
-          current = approach.point;
-          this.lock = contact.edge;
-          const rest = this.guided(current, target, allowed);
-          return { point: rest.point, trail: [...trail, ...rest.trail], touched: true };
+
+  constrain(target, contacts, rail = null) {
+    if (rail) {
+      // 첫 점 선택 중에는 원래 판자의 변 위에서만 움직입니다.
+      const delta = rail.b.subtract(rail.a);
+
+      let low = 0;
+      let high = 1;
+
+      for (const c of contacts) {
+        const slope = delta.dot(c.normal);
+        const base = rail.a
+          .subtract(c.edge.a)
+          .dot(c.normal);
+
+        if (Math.abs(slope) < 0.0000001) continue;
+
+        const t = -base / slope;
+
+        if (slope > 0) {
+          low = Math.max(low, t);
+        } else {
+          high = Math.min(high, t);
         }
       }
-      const hits = this.hits(next);
-      if (!hits.length && !this.boards.some(board => Wood.contains(board, next))) {
-        current = next;
-      } else {
-        touched = true;
-        let lo = 0, hi = 1;
-        for (let j = 0; j < 10; j++) {
-          const mid = (lo + hi) / 2;
-          if (!this.safe(current.add(step.multiply(mid)), allowed)) hi = mid;
-          else lo = mid;
-        }
-        current = current.add(step.multiply(lo));
-        const tangents = hits.flatMap(hit => {
-          const edge = hit.bodyA === this.probe ? hit.bodyB : hit.bodyA;
-          return [edge.plugin.tangent, new paper.Point(-hit.normal.y, hit.normal.x)];
-        });
-        let best = current, progress = 0;
-        for (const tangent of tangents) {
-          const motion = tangent.multiply(step.dot(tangent) * (1 - lo));
-          const slide = current.add(motion), score = motion.dot(step);
-          if (score > progress && this.safe(slide, allowed)) { best = slide; progress = score; }
-        }
-        current = best;
-      }
-      trail.push(current.clone());
+
+      const t = target
+        .subtract(rail.a)
+        .dot(delta) / delta.dot(delta);
+
+      return rail.a.add(
+        delta.multiply(Math.max(low, Math.min(high, t)))
+      );
     }
-    return { point: current, trail, touched };
+
+    let point = target.clone();
+
+    // 막힌 방향 성분만 제거합니다.
+    // 수직 면이면 X만 제한하고 Y는 그대로 유지합니다.
+    for (let i = 0; i < 8; i++) {
+      for (const c of contacts) {
+        const distance = point
+          .subtract(c.edge.a)
+          .dot(c.normal);
+
+        if (distance < 0) {
+          point = point.subtract(
+            c.normal.multiply(distance)
+          );
+        }
+      }
+    }
+
+    return point;
+  }
+
+  move(state, target, zoom, rail = null, anchor = null) {
+    const from = state.point.clone();
+
+    // 면의 끝을 지나도 제한선을 유지합니다.
+    // 허용된 쪽으로 충분히 떨어졌을 때 해제합니다.
+    state.contacts = state.contacts.filter(c =>
+      target.subtract(c.edge.a).dot(c.normal)
+        <= this.releasePixels / zoom
+    );
+
+    let point = from.clone();
+
+    for (let i = 0; i < this.edges.length + 2; i++) {
+      const wanted = this.constrain(
+        target,
+        state.contacts,
+        rail
+      );
+
+      point = rail
+        ? wanted
+        : Wood.limit(state.board, from, wanted);
+
+      let hit = this.crossing(
+        state.board,
+        from,
+        point
+      );
+
+      let source = from;
+
+      // 점의 이동뿐 아니라 직선 미리보기도 검사합니다.
+      // 교점에서 선을 자르지 않고 접촉면을 좌표 제한으로 추가합니다.
+      if ((!hit || hit.t >= 0.999999) && anchor) {
+        hit = this.crossing(
+          state.board,
+          anchor,
+          point
+        );
+        source = anchor;
+      }
+
+      if (!hit || hit.t >= 0.999999) break;
+
+      const exists = state.contacts.some(c =>
+        c.edge.board === hit.edge.board &&
+        c.edge.contour === hit.edge.contour &&
+        c.edge.index === hit.edge.index
+      );
+
+      if (exists) {
+        point = hit.point;
+        break;
+      }
+
+      state.contacts.push(
+        this.contact(hit, source, point)
+      );
+    }
+
+    state.point = point;
+
+    const blocked = state.contacts.some(c =>
+      Math.abs(
+        point.subtract(c.edge.a).dot(c.normal)
+      ) < 0.001
+    );
+
+    return { point, blocked };
+  }
+
+  update(point, zoom, visible = () => true) {
+    if (this.lock) {
+      // 해제 거리는 막힌 점이 아니라 원래 변에서 측정합니다.
+      // 변을 따라 옆으로 밀어도 다른 판자로 넘어가지 않습니다.
+      const target = this.nearest(this.lock, point);
+
+      if (
+        target.getDistance(point)
+          <= this.releasePixels / zoom
+      ) {
+        const result = this.move(
+          this.hoverMotion,
+          target,
+          zoom,
+          this.lock
+        );
+
+        return {
+          ...this.lock,
+          ...result
+        };
+      }
+
+      this.clear();
+    }
+
+    const radius = this.snapPixels / zoom;
+
+    if (
+      !this.probe ||
+      Math.abs(radius - this.radius) > 0.0001
+    ) {
+      this.probe = Matter.Bodies.circle(
+        0,
+        0,
+        radius * 1.1,
+        { isSensor: true }
+      );
+
+      this.radius = radius;
+    }
+
+    Matter.Body.setPosition(this.probe, {
+      x: point.x,
+      y: point.y
+    });
+
+    const candidates = new Set(
+      Matter.Query.collides(this.probe, this.edges).map(hit =>
+        hit.bodyA === this.probe ? hit.bodyB : hit.bodyA
+      )
+    );
+
+    let best = null;
+
+    for (const body of this.edges) {
+      if (!candidates.has(body)) continue;
+
+      const edge = body.plugin.edge;
+      const snapped = this.nearest(edge, point);
+      const distance = snapped.getDistance(point);
+
+      if (
+        distance <= radius &&
+        (!best || distance < best.distance - 0.0001) &&
+        visible(edge.board, snapped)
+      ) {
+        best = {
+          ...edge,
+          point: snapped,
+          distance,
+          blocked: false
+        };
+      }
+    }
+
+    if (best) {
+      this.lock = {
+        board: best.board,
+        contour: best.contour,
+        index: best.index,
+        a: best.a,
+        b: best.b
+      };
+
+      this.hoverMotion = this.motion(
+        best.board,
+        best.point
+      );
+    }
+
+    return best;
   }
 };

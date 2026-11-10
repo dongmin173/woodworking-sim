@@ -1,121 +1,443 @@
-/* Paper.js: 판자 표시, 경계 위치, 선 검증, 경계와 절단 경로로 두 다각형 만들기. */
+/* 판자 도형, 톱 절단, 픽셀 격자와 구두칼 차집합. */
 window.Wood = {
   nextId: 1,
+
   create(x, y, w, h, name = "판자") {
-    return { id: this.nextId++, name, x, y,
-      points: [[0, 0], [w, 0], [w, h], [0, h]], marks: [] };
+    return {
+      id: this.nextId++,
+      name,
+      x,
+      y,
+      contours: [[[0, 0], [w, 0], [w, h], [0, h]]],
+      marks: [],
+      gridX: 0,
+      gridY: 0
+    };
   },
+
   shape(board) {
+    const paths = board.contours.map(points => new paper.Path({
+      segments: points.map(([x, y]) => [board.x + x, board.y + y]),
+      closed: true,
+      insert: false
+    }));
+
+    return paths.length === 1
+      ? paths[0]
+      : new paper.CompoundPath({ children: paths, insert: false });
+  },
+
+  line(board, mark) {
     return new paper.Path({
-      segments: board.points.map(([x, y]) => [board.x + x, board.y + y]),
-      closed: true, insert: false
+      segments: mark.map(([x, y]) => [board.x + x, board.y + y]),
+      insert: false
     });
   },
-  line(board, points) {
-    return new paper.Path({
-      segments: points.map(([x, y]) => [board.x + x, board.y + y]), insert: false
-    });
-  },
+
   area(board) {
-    const path = this.shape(board), area = Math.abs(path.area);
+    const path = this.shape(board);
+    const area = Math.abs(path.area);
     path.remove();
     return area;
   },
+
   bounds(board) {
-    const path = this.shape(board), bounds = path.bounds.clone();
+    const path = this.shape(board);
+    const bounds = path.bounds.clone();
     path.remove();
     return bounds;
   },
+
   sorted(boards) {
-    return [...boards].sort((a, b) => this.area(b) - this.area(a) || a.id - b.id);
+    return [...boards].sort(
+      (a, b) => this.area(b) - this.area(a) || a.id - b.id
+    );
   },
+
   contains(board, point) {
-    const path = this.shape(board), inside = path.contains(point);
+    const path = this.shape(board);
+    const inside = path.contains(point);
     path.remove();
     return inside;
   },
+
   edge(board, point) {
-    const path = this.shape(board), location = path.getNearestLocation(point);
-    const result = { point: location.point.clone(), offset: location.offset,
-      distance: location.point.getDistance(point) };
+    const path = this.shape(board);
+    const nearest = path.getNearestPoint(point);
+
+    const result = {
+      point: nearest.clone(),
+      distance: nearest.getDistance(point)
+    };
+
     path.remove();
     return result;
   },
-  draw(board, index) {
-    const path = this.shape(board);
-    path.fillColor = index === 0 ? "#cb945a" : "#e3c18b";
-    path.strokeColor = "#72502f";
-    path.strokeWidth = 2;
-    path.shadowColor = new paper.Color(0, 0, 0, 0.16);
-    path.shadowBlur = 5;
-    path.shadowOffset = new paper.Point(2, 4);
-    paper.project.activeLayer.addChild(path);
-    const b = path.bounds, mask = path.clone({ insert: false });
-    mask.shadowColor = null;
-    mask.clipMask = true;
-    const grain = new paper.Group([mask]);
-    for (let y = b.top + 12; y < b.bottom; y += 13) {
-      grain.addChild(new paper.Path.Line({
-        from: [b.left, y], to: [b.right, y + 3], strokeColor: "#a97845", strokeWidth: 1
-      }));
-    }
-    for (const mark of board.marks) {
-      const line = this.line(board, mark);
-      line.strokeColor = "#34322e";
-      line.strokeWidth = 2.5;
-      line.strokeCap = "round";
-      paper.project.activeLayer.addChild(line);
-    }
-  },
-  // 절단선은 열린 단순 경로이며, 양 끝만 판자 경계에 닿아야 합니다.
-  validMark(board, points) {
-    if (points.length < 2) return false;
-    const path = this.shape(board), line = this.line(board, points);
-    const ends = [line.firstSegment.point, line.lastSegment.point];
-    let valid = line.length > 8 && ends[0].getDistance(ends[1]) > 4
-      && ends.every(p => path.getNearestPoint(p).getDistance(p) < 0.05)
-      && line.getIntersections().length === 0;
-    if (valid) {
-      // 중간 경계 접촉/이탈은 두 조각으로 나누는 열린 절단으로 인정하지 않습니다.
-      valid = path.getIntersections(line).every(hit =>
-        ends.some(p => p.getDistance(hit.point) < 0.1));
-      for (let offset = 0.5; valid && offset < line.length - 0.5; offset += 1) {
-        const p = line.getPointAt(offset);
-        valid = path.contains(p) && path.getNearestPoint(p).getDistance(p) > 0.02;
+
+  intervals(path, a, b) {
+    const delta = b.subtract(a);
+    const length2 = delta.dot(delta);
+    if (length2 < 0.000001) return [];
+
+    const line = new paper.Path({
+      segments: [a, b],
+      insert: false
+    });
+
+    const values = [
+      0,
+      1,
+      ...path.getIntersections(line).map(hit =>
+        hit.point.subtract(a).dot(delta) / length2
+      )
+    ]
+      .filter(t => t >= 0 && t <= 1)
+      .sort((x, y) => x - y);
+
+    const cuts = values.filter(
+      (t, i) => !i || t - values[i - 1] > 0.000001
+    );
+
+    const intervals = [];
+
+    for (let i = 0; i < cuts.length - 1; i++) {
+      const left = cuts[i];
+      const right = cuts[i + 1];
+      const mid = a.add(delta.multiply((left + right) / 2));
+
+      if (
+        path.contains(mid) ||
+        path.getNearestPoint(mid).getDistance(mid) < 0.001
+      ) {
+        intervals.push([left, right]);
       }
     }
-    path.remove();
+
     line.remove();
-    return valid;
+    return intervals;
   },
-  cut(board, mark) {
-    if (!this.validMark(board, mark)) return null;
-    const path = this.shape(board), line = this.line(board, mark);
-    const a = path.getNearestLocation(line.firstSegment.point).offset;
-    const b = path.getNearestLocation(line.lastSegment.point).offset;
-    // start → end 방향으로 원래 판자 테두리를 걷습니다. 마지막 변 이후에는 순환합니다.
-    const walk = (start, end) => {
-      const length = path.length, distance = (end - start + length) % length;
-      const vertices = path.segments.map(s => ({
-        p: s.point, distance: (s.location.offset - start + length) % length
-      })).filter(s => s.distance > 0.001 && s.distance < distance - 0.001)
-        .sort((x, y) => x.distance - y.distance);
-      return [path.getPointAt(start), ...vertices.map(s => s.p), path.getPointAt(end)];
-    };
-    const trace = line.segments.map(s => s.point);
-    const polygons = [
-      [...trace, ...walk(b, a).slice(1, -1)],
-      [...trace].reverse().concat(walk(a, b).slice(1, -1))
-    ].map(segments => new paper.Path({ segments, closed: true, insert: false }));
-    const totalArea = polygons.reduce((sum, p) => sum + Math.abs(p.area), 0);
-    const valid = polygons.every(p => Math.abs(p.area) > 2 && !p.getIntersections().length)
-      && Math.abs(totalArea - Math.abs(path.area)) < 0.1;
-    const pieces = valid ? polygons.map(p => {
-      const origin = p.bounds.topLeft;
-      return { id: this.nextId++, name: `${board.name} 조각`, x: origin.x, y: origin.y,
-        points: p.segments.map(s => [s.point.x - origin.x, s.point.y - origin.y]), marks: [] };
-    }) : null;
-    [...polygons, path, line].forEach(p => p.remove());
+
+  limit(board, a, b) {
+    const path = this.shape(board);
+    const spans = this.intervals(path, a, b);
+    let end = 0;
+
+    for (const [left, right] of spans) {
+      if (left > end + 0.000001) break;
+      end = right;
+    }
+
+    path.remove();
+    return a.add(b.subtract(a).multiply(end));
+  },
+
+  validMark(board, mark) {
+    if (mark.length !== 2) return false;
+
+    const [a, b] = mark.map(([x, y]) =>
+      new paper.Point(board.x + x, board.y + y)
+    );
+
+    return (
+      a.getDistance(b) > 3 &&
+      (
+        this.contains(board, a) ||
+        this.edge(board, a).distance < 0.05
+      ) &&
+      this.limit(board, a, b).getDistance(b) < 0.01
+    );
+  },
+
+  draw(board, preview = null) {
+    const path = this.shape(board);
+
+    path.fillColor = "#cb945a";
+    path.strokeColor = "#72502f";
+
+    // 확대했을 때 외곽선이 1픽셀짜리 구멍을 덮지 않도록 합니다.
+    path.strokeWidth = Math.min(2, 1.5 / paper.view.zoom);
+
+    paper.project.activeLayer.addChild(path);
+
+    const mask = path.clone({ insert: false });
+    mask.clipMask = true;
+
+    const contents = new paper.Group([mask]);
+    const b = path.bounds;
+
+    for (let y = b.top + 12; y < b.bottom; y += 13) {
+      contents.addChild(new paper.Path.Line({
+        from: [b.left, y],
+        to: [b.right, y + 3],
+        strokeColor: "#a97845",
+        strokeWidth: 1
+      }));
+    }
+
+    for (const mark of [
+      ...board.marks,
+      ...(preview ? [preview] : [])
+    ]) {
+      const line = this.line(board, mark);
+      line.strokeColor = "#34322e";
+      line.strokeWidth = 2;
+      line.opacity = mark === preview ? 0.35 : 1;
+      contents.addChild(line);
+    }
+  },
+
+  cut(board, index, width = 6) {
+    const mark = board.marks[index];
+
+    if (!mark || !this.validMark(board, mark) || width <= 0) {
+      return null;
+    }
+
+    const [a, b] = mark.map(([x, y]) =>
+      new paper.Point(board.x + x, board.y + y)
+    );
+
+    const direction = b.subtract(a).normalize();
+    const normal = new paper.Point(
+      -direction.y,
+      direction.x
+    ).multiply(width / 2);
+
+    const cutter = new paper.Path({
+      closed: true,
+      insert: false,
+      segments: [
+        a.add(normal),
+        b.add(normal),
+        b.subtract(normal),
+        a.subtract(normal)
+      ]
+    });
+
+    const source = this.shape(board);
+    const result = source.subtract(cutter, { insert: false });
+
+    const removedArea =
+      Math.abs(source.area) - Math.abs(result.area);
+
+    if (removedArea < 0.00001) {
+      [source, cutter, result].forEach(p => p.remove());
+      return null;
+    }
+
+    result.reorient(true, true);
+
+    const pieces = this.parts(board, result, index);
+
+    [source, cutter, result].forEach(p => p.remove());
+
+    return { pieces, removedArea };
+  },
+
+  parts(board, result, skip = -1) {
+    const paths = result instanceof paper.CompoundPath
+      ? result.children
+      : [result];
+
+    const groups = paths
+      .filter(p => p.clockwise && Math.abs(p.area) > 0.00001)
+      .map(outer => ({ outer, holes: [] }));
+
+    for (const hole of paths.filter(p => !p.clockwise)) {
+      const owners = groups
+        .filter(g => g.outer.contains(hole.getInteriorPoint()))
+        .sort((a, b) =>
+          Math.abs(a.outer.area) - Math.abs(b.outer.area)
+        );
+
+      if (owners.length) owners[0].holes.push(hole);
+    }
+
+    const pieces = groups.map(({ outer, holes }) => {
+      const origin = outer.bounds.topLeft;
+
+      const piece = {
+        id: this.nextId++,
+        name: board.name,
+        x: origin.x,
+        y: origin.y,
+
+        // 조각의 원점이 바뀌어도 기존 픽셀 격자를 유지합니다.
+        gridX: board.x + (board.gridX || 0) - origin.x,
+        gridY: board.y + (board.gridY || 0) - origin.y,
+
+        contours: [outer, ...holes].map(p =>
+          p.segments.map(s => [
+            s.point.x - origin.x,
+            s.point.y - origin.y
+          ])
+        ),
+        marks: []
+      };
+
+      const shape = this.shape(piece);
+
+      board.marks.forEach((other, i) => {
+        if (i === skip) return;
+
+        const [start, end] = other.map(([x, y]) =>
+          new paper.Point(board.x + x, board.y + y)
+        );
+
+        for (const [left, right] of this.intervals(shape, start, end)) {
+          const points = [left, right].map(t =>
+            start.add(end.subtract(start).multiply(t))
+          );
+
+          if (points[0].getDistance(points[1]) > 3) {
+            piece.marks.push(points.map(p => [
+              p.x - origin.x,
+              p.y - origin.y
+            ]));
+          }
+        }
+      });
+
+      shape.remove();
+      return piece;
+    });
+
     return pieces;
+  },
+
+  cell(board, point) {
+    return [
+      Math.floor(
+        point.x - board.x - (board.gridX || 0) + 1e-9
+      ),
+      Math.floor(
+        point.y - board.y - (board.gridY || 0) + 1e-9
+      )
+    ];
+  },
+
+  cellOrigin(board, cell) {
+    return new paper.Point(
+      board.x + (board.gridX || 0) + cell[0],
+      board.y + (board.gridY || 0) + cell[1]
+    );
+  },
+
+  // 선택한 픽셀 사각형들을 하나의 제거 영역으로 합칩니다.
+  stencil(board, cells) {
+    let shapes = cells.map(([x, y]) => {
+      x += board.gridX || 0;
+      y += board.gridY || 0;
+
+      return [[[
+        [x, y],
+        [x + 1, y],
+        [x + 1, y + 1],
+        [x, y + 1],
+        [x, y]
+      ]]];
+    });
+
+    while (shapes.length > 1) {
+      const next = [];
+
+      for (let i = 0; i < shapes.length; i += 2) {
+        next.push(
+          i + 1 < shapes.length
+            ? martinez.union(shapes[i], shapes[i + 1])
+            : shapes[i]
+        );
+      }
+
+      shapes = next;
+    }
+
+    return shapes[0] || null;
+  },
+
+  carve(board, stencil) {
+    if (!stencil) return null;
+
+    const subject = board.contours.map(ring => [
+      ...ring,
+      ring[0]
+    ]);
+
+    const geometry = martinez.diff(subject, stencil) || [];
+
+    const children = geometry.flatMap(polygon =>
+      polygon.map((ring, index) => {
+        const path = new paper.Path({
+          insert: false,
+          closed: true,
+          segments: ring.slice(0, -1).map(([x, y]) => [
+            board.x + x,
+            board.y + y
+          ])
+        });
+
+        path.clockwise = index === 0;
+        return path;
+      })
+    );
+
+    const result = new paper.CompoundPath({
+      children,
+      insert: false
+    });
+
+    const removedArea =
+      this.area(board) - Math.abs(result.area);
+
+    const pieces = this.parts(board, result);
+    result.remove();
+
+    return removedArea > 0.00000001
+      ? { pieces, removedArea }
+      : null;
+  },
+
+  grid(board) {
+    if (paper.view.zoom < 6) return;
+
+    const bounds = this.bounds(board).intersect(
+      paper.view.bounds
+    );
+
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+
+    const origin = this.cellOrigin(board, [0, 0]);
+    const mask = this.shape(board);
+    mask.clipMask = true;
+
+    const group = new paper.Group([mask]);
+
+    for (
+      let x = Math.ceil(bounds.left - origin.x);
+      x <= bounds.right - origin.x;
+      x++
+    ) {
+      group.addChild(new paper.Path.Line({
+        from: [origin.x + x, bounds.top],
+        to: [origin.x + x, bounds.bottom],
+        strokeColor: "#735d43",
+        strokeWidth: 0.5 / paper.view.zoom,
+        opacity: 0.45
+      }));
+    }
+
+    for (
+      let y = Math.ceil(bounds.top - origin.y);
+      y <= bounds.bottom - origin.y;
+      y++
+    ) {
+      group.addChild(new paper.Path.Line({
+        from: [bounds.left, origin.y + y],
+        to: [bounds.right, origin.y + y],
+        strokeColor: "#735d43",
+        strokeWidth: 0.5 / paper.view.zoom,
+        opacity: 0.45
+      }));
+    }
   }
 };
