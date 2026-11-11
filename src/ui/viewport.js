@@ -5,7 +5,7 @@ window.WorkshopViewport = class {
     this.output = output;
     this.redraw = redraw;
     this.factor = 1;
-    this.focus = new paper.Point(500, 300);
+    this.focus = this.centerPoint();
     this.panning = null;
     this.ready = false;
 
@@ -13,10 +13,15 @@ window.WorkshopViewport = class {
     this.resize();
   }
 
+  centerPoint() {
+    const { width, height } = Workshop.config.world;
+    return new paper.Point(width / 2, height / 2);
+  }
+
   resize() {
     const center = this.ready
       ? paper.view.center.clone()
-      : new paper.Point(500, 300);
+      : this.centerPoint();
 
     paper.view.viewSize = new paper.Size(
       this.box.clientWidth,
@@ -24,8 +29,8 @@ window.WorkshopViewport = class {
     );
 
     this.fitZoom = Math.min(
-      this.box.clientWidth / 1000,
-      this.box.clientHeight / 600
+      this.box.clientWidth / Workshop.config.world.width,
+      this.box.clientHeight / Workshop.config.world.height
     );
 
     paper.view.zoom = this.fitZoom * this.factor;
@@ -46,8 +51,8 @@ window.WorkshopViewport = class {
     const screen = paper.view.projectToView(anchor);
 
     this.factor = Math.max(
-      1,
-      Math.min(32, this.factor * multiplier)
+      Workshop.config.zoom.min,
+      Math.min(Workshop.config.zoom.max, this.factor * multiplier)
     );
 
     paper.view.zoom = this.fitZoom * this.factor;
@@ -61,7 +66,7 @@ window.WorkshopViewport = class {
 
   fit() {
     this.factor = 1;
-    this.focus = new paper.Point(500, 300);
+    this.focus = this.centerPoint();
     paper.view.zoom = this.fitZoom;
     paper.view.center = this.focus;
     this.update();

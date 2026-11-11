@@ -2,20 +2,14 @@ window.WorkshopTools = window.WorkshopTools || {};
 
 WorkshopTools.Knife = class extends WorkshopTools.Carver {
   constructor(ctx) {
-    super(ctx, {
-      name: "구두칼",
-      size: 4,
-      dragOnly: false
-    });
+    super(ctx, { name: "구두칼", size: 4, dragOnly: false });
   }
 
   activate() {
     this.previousTip = null;
-
     this.ctx.say(
-      "구두칼: 클릭·드래그로 4×4px를 깎습니다. "
-      + "연필선과 꺾인 모서리에서 칼 면적이 막힙니다. "
-      + "선 끝을 돌아가거나 마우스를 놓고 반대편에서 다시 시작하세요."
+      "구두칼: 클릭·드래그로 4×4px를 자유롭게 깎습니다. "
+      + "Ctrl을 누르면 연필선을 보호합니다."
     );
   }
 
@@ -23,7 +17,6 @@ WorkshopTools.Knife = class extends WorkshopTools.Carver {
     if (this.tip && this.tip.getDistance(point) > 1e-9) {
       this.previousTip = this.tip.clone();
     }
-
     super.move(point);
   }
 
@@ -46,8 +39,6 @@ WorkshopTools.Knife = class extends WorkshopTools.Carver {
 
       const tangent = b.subtract(a).normalize();
       const normal = new paper.Point(-tangent.y, tangent.x);
-
-      // 2px 연필선과 모서리를 빈틈없이 보호하는 유한한 띠입니다.
       const start = a.subtract(tangent);
       const end = b.add(tangent);
 
@@ -70,8 +61,21 @@ WorkshopTools.Knife = class extends WorkshopTools.Carver {
   }
 
   footprint(record, point) {
+    const protect = !!this.ctx.modifiers.control;
+
+    // Ctrl 상태가 달라지면 이전 보호 영역의 연결 상태를 초기화합니다.
+    if (record.protect !== protect) {
+      record.lastFootprint?.remove();
+      record.lastFootprint = null;
+      record.brushKey = null;
+      record.protect = protect;
+    }
+
     const square = super.footprint(record, point);
     if (!square) return null;
+
+    // 기본 모드에서는 연필선을 무시합니다.
+    if (!protect) return square;
 
     this.prepare(record);
 
@@ -96,8 +100,6 @@ WorkshopTools.Knife = class extends WorkshopTools.Carver {
     let allowed;
 
     if (record.lastFootprint) {
-      // 직전 칼 영역과 실제로 이어지는 쪽만 선택합니다.
-      // 선 너머로 건너뛰지 않습니다.
       allowed = pieces.filter(piece => {
         const overlap = piece.intersect(
           record.lastFootprint,
@@ -110,7 +112,6 @@ WorkshopTools.Knife = class extends WorkshopTools.Carver {
         return connected;
       });
     } else {
-      // 선 위에서 시작하면 직전에 마우스가 있던 쪽을 우선합니다.
       const reference = pieces.some(piece =>
         piece.contains(point)
       ) ? point : (this.previousTip || point);
@@ -156,10 +157,10 @@ WorkshopTools.Knife = class extends WorkshopTools.Carver {
       marks: []
     };
 
-    // 실제 드래그 상태를 바꾸지 않는 별도의 미리보기입니다.
     const preview = {
       source,
       prepared: record?.prepared,
+      protect: record?.protect,
       barrier: record?.barrier,
       barrierBounds: record?.barrierBounds,
       lastFootprint: record?.lastFootprint?.clone({
@@ -181,6 +182,8 @@ WorkshopTools.Knife = class extends WorkshopTools.Carver {
 
     if (!record?.prepared) preview.barrier?.remove();
 
-    this.ctx.hud("구두칼 · 4×4px · 연필선 경계 보호");
+    this.ctx.hud(this.ctx.modifiers.control
+      ? "구두칼 · 4×4px · Ctrl: 연필선 보호"
+      : "구두칼 · 4×4px · 자유 깎기 · Ctrl: 연필선 보호");
   }
 };

@@ -1,6 +1,4 @@
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
 body {
   margin: 0;
@@ -49,9 +47,7 @@ button, select {
   cursor: pointer;
 }
 
-button:hover {
-  background: #e9e1d1;
-}
+button:hover { background: #e9e1d1; }
 
 button:disabled {
   opacity: .45;
@@ -86,6 +82,25 @@ aside {
 aside p {
   color: #82725e;
   font-size: 13px;
+}
+
+.layer-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid #c7bba7;
+  padding-top: 12px;
+}
+
+.layer-controls button {
+  padding: 8px 6px;
+  font-size: 14px;
+}
+
+#selected-board {
+  font-size: 13px;
+  color: #514335;
+  overflow-wrap: anywhere;
 }
 
 section {
@@ -130,13 +145,8 @@ footer {
 }
 
 @media (max-width: 650px) {
-  body {
-    padding: 12px;
-  }
-
-  main {
-    flex-direction: column;
-  }
+  body { padding: 12px; }
+  main { flex-direction: column; }
 
   aside {
     width: 100%;
@@ -144,11 +154,14 @@ footer {
     flex-wrap: wrap;
   }
 
-  aside p {
-    display: none;
+  aside p { display: none; }
+
+  .layer-controls {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
   }
 
-  button, select {
-    padding: 8px 10px;
-  }
+  button, select { padding: 8px 10px; }
 }

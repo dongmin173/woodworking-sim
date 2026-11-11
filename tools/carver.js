@@ -41,16 +41,15 @@ WorkshopTools.Carver = class {
       start: point.clone(),
       last: point.clone(),
       started: false,
-
       records: new Map(order.map(source => [
-        source, {
+        source,
+        {
           source,
           shown: [source],
           remaining: Wood.shape(source),
           removedArea: 0
         }
       ])),
-
       shapes: new Map(order.map(b => [b, Wood.shape(b)])),
       bounds: new Map(order.map(b => [b, Wood.bounds(b)]))
     };
@@ -90,8 +89,47 @@ WorkshopTools.Carver = class {
     });
   }
 
+  erase(record, cutter) {
+    const s = this.stroke;
+    const layer = s.order.indexOf(record.source);
+
+    for (const upper of s.order.slice(0, layer)) {
+      if (!cutter.bounds.intersects(s.bounds.get(upper))) continue;
+
+      const visible = cutter.subtract(
+        s.shapes.get(upper),
+        { insert: false }
+      );
+
+      cutter.remove();
+      cutter = visible;
+    }
+
+    const result = Wood.carve(
+      record.source,
+      cutter,
+      record.remaining
+    );
+
+    cutter.remove();
+
+    if (!result) return true;
+    if (result.invalid) return false;
+
+    this.ctx.replace(record.shown, result.pieces, false);
+
+    record.remaining.remove();
+    record.remaining = result.remaining;
+    record.shown = result.pieces;
+    record.removedArea += result.removedArea;
+    record.cleaned ||= result.cleaned;
+
+    return true;
+  }
+
   stamp(point) {
-    const s = this.stroke, delta = point.subtract(s.last);
+    const s = this.stroke;
+    const delta = point.subtract(s.last);
 
     const steps = Math.max(
       1,
@@ -104,7 +142,6 @@ WorkshopTools.Carver = class {
       const p = s.last.add(delta.multiply(i / steps));
 
       for (const record of s.records.values()) {
-        // 빈 테이블에서도 상태를 갱신해야 선 끝을 돌아갈 수 있습니다.
         const footprint = this.footprint(record, p);
         if (!footprint) continue;
 
@@ -123,45 +160,44 @@ WorkshopTools.Carver = class {
     s.last = point.clone();
 
     for (const [record, footprints] of pending) {
-      let cutter = Wood.union(footprints);
-      const layer = s.order.indexOf(record.source);
-
-      // 시작할 때 위에 있던 재료는 아래 판자를 계속 가립니다.
-      for (const upper of s.order.slice(0, layer)) {
-        if (!cutter.bounds.intersects(s.bounds.get(upper))) {
-          continue;
-        }
-
-        const visible = cutter.subtract(
-          s.shapes.get(upper),
-          { insert: false }
-        );
-
-        cutter.remove();
-        cutter = visible;
-      }
-
-      const result = Wood.carve(
-        record.source,
-        cutter,
-        record.remaining
+      const budget = footprints.reduce(
+        (sum, path) => sum + Math.abs(path.area),
+        0
       );
 
-      cutter.remove();
-      if (!result) continue;
+      const envelope = footprints.reduce(
+        (bounds, path) => bounds
+          ? bounds.unite(path.bounds)
+          : path.bounds.clone(),
+        null
+      );
 
-      this.ctx.replace(record.shown, result.pieces, false);
+      const cutter = Wood.union(footprints);
+      const bounds = cutter.bounds;
 
-      record.remaining.remove();
-      record.remaining = result.remaining;
-      record.shown = result.pieces;
-      record.removedArea += result.removedArea;
-      record.cleaned ||= result.cleaned;
+      const valid = Number.isFinite(cutter.area)
+        && Math.abs(cutter.area) <= budget + 1e-6
+        && bounds.left >= envelope.left - 1e-6
+        && bounds.right <= envelope.right + 1e-6
+        && bounds.top >= envelope.top - 1e-6
+        && bounds.bottom <= envelope.bottom + 1e-6;
+
+      if (valid && this.erase(record, cutter)) continue;
+      if (!valid) cutter.remove();
+
+      // 병합 결과가 불안정하면 작은 칼 영역을 하나씩 적용합니다.
+      for (const footprint of footprints) {
+        this.erase(
+          record,
+          footprint.clone({ insert: false })
+        );
+      }
     }
 
     const records = [...s.records.values()];
     const area = records.reduce(
-      (sum, r) => sum + r.removedArea, 0
+      (sum, r) => sum + r.removedArea,
+      0
     );
 
     this.ctx.say(

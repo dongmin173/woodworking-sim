@@ -4,24 +4,29 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>작은 목공 작업실</title>
-  <link rel="stylesheet" href="style.css">
-
+  <link rel="stylesheet" href="styles/workshop.css">
   <script defer src="vendor/paper-full.min.js"></script>
   <script defer src="vendor/matter.min.js"></script>
-  <script defer src="vendor/martinez.umd.min.js"></script>
-
-  <script defer src="wood.js"></script>
-  <script defer src="collision.js"></script>
-  <script defer src="viewport.js"></script>
-
+  <script defer src="src/config.js"></script>
+  <script defer src="src/wood/model.js"></script>
+  <script defer src="src/wood/geometry.js"></script>
+  <script defer src="src/wood/cutting.js"></script>
+  <script defer src="src/render/board-renderer.js"></script>
+  <script defer src="src/physics/edge-snap.js"></script>
+  <script defer src="src/physics/board-collision.js"></script>
+  <script defer src="src/ui/viewport.js"></script>
+  <script defer src="src/ui/controls.js"></script>
+  <script defer src="src/render/scene-renderer.js"></script>
+  <script defer src="src/app/scene.js"></script>
+  <script defer src="src/app/input-controller.js"></script>
+  <script defer src="src/app/application.js"></script>
   <script defer src="tools/cursors.js"></script>
   <script defer src="tools/carver.js"></script>
   <script defer src="tools/move.js"></script>
   <script defer src="tools/pencil.js"></script>
   <script defer src="tools/saw.js"></script>
   <script defer src="tools/knife.js"></script>
-
-  <script defer src="app.js"></script>
+  <script defer src="src/main.js"></script>
 </head>
 <body>
   <header>
@@ -29,7 +34,6 @@
       <small>COMPUTER GRAPHICS · PROJECT 2</small>
       <h1>작은 목공 작업실</h1>
     </div>
-
     <nav aria-label="보기 설정">
       <button id="zoom-out" aria-label="축소">−</button>
       <output id="zoom-level" aria-live="polite">100%</output>
@@ -46,10 +50,26 @@
       <button data-tool="saw" aria-pressed="false">🪚 톱</button>
       <button data-tool="knife" aria-pressed="false">🔪 구두칼</button>
 
+      <div class="layer-controls" role="group" aria-label="선택한 판자 높이">
+        <output id="selected-board" aria-live="polite">
+          이동 도구로 판자를 선택하세요.
+        </output>
+        <button id="board-up" disabled
+          title="마지막으로 선택한 판자를 한 단계 올립니다">
+          ▲ 판자 올리기
+        </button>
+        <button id="board-down" disabled
+          title="마지막으로 선택한 판자를 한 단계 내립니다">
+          ▼ 뒤로 보내기
+        </button>
+      </div>
+
       <button id="cancel" disabled>취소 / 연결 종료</button>
 
       <p>
         연필: 점 이어 그리기<br>
+        같은 높이·위쪽 판자에만 막힘<br>
+        올리기 / 뒤로: 선택한 판자 높이 ±1<br>
         톱: 끝부분 드래그로 깎기<br>
         구두칼: 4×4px 깎기<br>
         Space+드래그: 화면 이동<br>
@@ -61,7 +81,6 @@
       <div id="workspace">
         <canvas id="canvas" aria-label="목공 작업대"></canvas>
       </div>
-
       <p id="status" role="status" aria-live="polite">
         작업대를 준비하고 있습니다.
       </p>
